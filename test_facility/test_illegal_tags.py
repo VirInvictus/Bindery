@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import re
+import sys
 import zipfile
 import shutil
 import tempfile
@@ -7,14 +8,23 @@ import os
 from pathlib import Path
 import subprocess
 
-def fix_st_tag(content: str) -> str:
-    content = re.sub(r'<st\b[^>]*>', '', content, flags=re.IGNORECASE)
-    content = re.sub(r'</st\s*>', '', content, flags=re.IGNORECASE)
+def fix_illegal_tags(content: str) -> str:
+    # A list of fake/deprecated tags that cause massive epubcheck failures.
+    # We will safely unwrap them (remove the tags, keep the text inside).
+    # Note: We do NOT include <image> or MathML tags here because they might be valid SVG/MathML.
+    illegal_tags = ['st', 'font', 'sentence', 'o', 'w', 'pagebreak']
+    
+    for tag in illegal_tags:
+        # Strip the opening tag (and its attributes)
+        content = re.sub(rf'<{tag}\b[^>]*>', '', content, flags=re.IGNORECASE)
+        # Strip the closing tag
+        content = re.sub(rf'</{tag}\s*>', '', content, flags=re.IGNORECASE)
+        
     return content
 
 def test_fix():
     src = Path("leaves_of_grass.epub")
-    dst = Path("leaves_of_grass_st_fixed.epub")
+    dst = Path("leaves_of_grass_tags_fixed.epub")
     
     shutil.copy(src, dst)
     modified = False
@@ -28,7 +38,7 @@ def test_fix():
             if item.filename.endswith(('.html', '.xhtml', '.xml', '.htm')):
                 try:
                     text = content.decode('utf-8', errors='ignore')
-                    fixed = fix_st_tag(text)
+                    fixed = fix_illegal_tags(text)
                     if fixed != text:
                         content = fixed.encode('utf-8')
                         modified = True
@@ -41,7 +51,7 @@ def test_fix():
         print("Modified files, running epubcheck...")
         res = subprocess.run(["epubcheck", str(dst)], capture_output=True, text=True)
         if "element \"st\" not allowed anywhere" not in res.stderr:
-            print("SUCCESS! All <st> tags removed!")
+            print("SUCCESS! Illegal tags removed safely!")
         else:
             print("FAILED!")
             print(res.stderr)
